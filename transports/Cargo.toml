@@ -1,0 +1,9 @@
+[package]
+name = "transports"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../common" }
+tokio = { version = "1", features = ["full"] }
+# quinn = { version = "0.10", features = ["rustls"] } # Temporarily commented out due to local compilation issues

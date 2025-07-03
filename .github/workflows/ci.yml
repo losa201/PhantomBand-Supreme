@@ -1,0 +1,53 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build all crates
+      run: cargo build --verbose
+
+    - name: Run tests
+      run: cargo test --verbose
+
+  cross-compile-android:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Android NDK and toolchains
+      run: |
+        rustup target add aarch64-linux-android armv7-linux-androideabi
+        sudo apt-get update && sudo apt-get install -y clang cmake ninja-build
+        # Install 'cross' for easier cross-compilation
+        cargo install cross --git https://github.com/cross-rs/cross
+
+    - name: Cross-compile for Android (aarch64)
+      run: cross build --target aarch64-linux-android --workspace
+
+    - name: Cross-compile for Android (armv7)
+      run: cross build --target armv7-linux-androideabi --workspace
