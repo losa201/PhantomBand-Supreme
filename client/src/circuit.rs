@@ -4,9 +4,11 @@ use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::transports::quic::QuicTransport;
 use crate::transports::r#trait::PluggableTransport;
+use crate::transports::tcp::{send_message, receive_message};
 use common::protocol::PhantomBandMessage;
 use common::crypto;
-use serde_json;
+use bincode;
+use log::{info, error};
 
 pub struct Circuit {
     pub id: u64,
@@ -19,25 +21,24 @@ impl Circuit {
     }
 
     pub fn build(&mut self) -> Result<(), String> {
-        println!("Building circuit...");
+        info!("Building circuit...");
         // TODO: Implement circuit building logic
         Ok(())
     }
 
     pub async fn send(&self, data: &[u8]) -> Result<(), String> {
-        println!("Sending data through circuit...");
+        info!("Sending data through circuit...");
         // TODO: Implement data sending logic
         Ok(())
     }
 
     pub async fn connect_to_relay(&mut self, relay_address: &str) -> Result<(), String> {
-        println!("Attempting to connect to relay at: {}", relay_address);
-        let quic_transport = QuicTransport;
+        info!("Attempting to connect to relay at: {}", relay_address);
         // For now, we'll use a direct TCP connection for message exchange demonstration
         // In a real scenario, the QuicTransport would handle the underlying connection.
         match TcpStream::connect(relay_address).await {
             Ok(mut stream) => {
-                println!("Successfully connected to relay at: {}", relay_address);
+                info!("Successfully connected to relay at: {}", relay_address);
 
                 // 1. Send ConnectRequest
                 let client_id = "test_client_id".to_string();
@@ -46,38 +47,37 @@ impl Circuit {
                     client_id,
                     public_key,
                 };
-                let serialized_request = serde_json::to_string(&connect_request)
+                let serialized_request = bincode::serialize(&connect_request)
                     .map_err(|e| format!("Failed to serialize ConnectRequest: {}", e))?;
-                stream.write_all(serialized_request.as_bytes()).await
-                    .map_err(|e| format!("Failed to send ConnectRequest: {}", e))?;
-                stream.write_all(b"\n").await.map_err(|e| format!("Failed to send newline: {}", e))?;
-                println!("Sent ConnectRequest: {:?}", connect_request);
+                let encrypted_request = crypto::encrypt(&serialized_request, &public_key)
+                    .map_err(|e| format!("Failed to encrypt ConnectRequest: {}", e))?;
+                send_message(&mut stream, &encrypted_request).await?;
+                info!("Sent ConnectRequest: {:?}", connect_request);
 
                 // 2. Receive ConnectResponse
-                let mut buffer = vec![0; 1024];
-                let n = stream.read(&mut buffer).await
-                    .map_err(|e| format!("Failed to read ConnectResponse: {}", e))?;
-                let received_data = String::from_utf8_lossy(&buffer[..n]);
-                let connect_response: PhantomBandMessage = serde_json::from_str(&received_data)
+                let encrypted_response = receive_message(&mut stream).await?;
+                let decrypted_response = crypto::decrypt(&encrypted_response, &public_key)
+                    .map_err(|e| format!("Failed to decrypt ConnectResponse: {}", e))?;
+                let connect_response: PhantomBandMessage = bincode::deserialize(&decrypted_response)
                     .map_err(|e| format!("Failed to deserialize ConnectResponse: {}", e))?;
-                println!("Received ConnectResponse: {:?}", connect_response);
+                info!("Received ConnectResponse: {:?}", connect_response);
 
                 // 3. Send Data message
                 let data_message = PhantomBandMessage::Data { payload: b"Hello PhantomBand!".to_vec() };
-                let serialized_data = serde_json::to_string(&data_message)
+                let serialized_data = bincode::serialize(&data_message)
                     .map_err(|e| format!("Failed to serialize Data message: {}", e))?;
-                stream.write_all(serialized_data.as_bytes()).await
-                    .map_err(|e| format!("Failed to send Data message: {}", e))?;
-                stream.write_all(b"\n").await.map_err(|e| format!("Failed to send newline: {}", e))?;
-                println!("Sent Data message: {:?}", data_message);
+                let encrypted_data = crypto::encrypt(&serialized_data, &public_key)
+                    .map_err(|e| format!("Failed to encrypt Data message: {}", e))?;
+                send_message(&mut stream, &encrypted_data).await?;
+                info!("Sent Data message: {:?}", data_message);
 
                 // 4. Receive echoed Data message (optional, for demonstration)
-                let n = stream.read(&mut buffer).await
-                    .map_err(|e| format!("Failed to read echoed Data message: {}", e))?;
-                let received_data = String::from_utf8_lossy(&buffer[..n]);
-                let echoed_data: PhantomBandMessage = serde_json::from_str(&received_data)
+                let encrypted_echo = receive_message(&mut stream).await?;
+                let decrypted_echo = crypto::decrypt(&encrypted_echo, &public_key)
+                    .map_err(|e| format!("Failed to decrypt echoed Data message: {}", e))?;
+                let echoed_data: PhantomBandMessage = bincode::deserialize(&decrypted_echo)
                     .map_err(|e| format!("Failed to deserialize echoed Data message: {}", e))?;
-                println!("Received echoed Data message: {:?}", echoed_data);
+                info!("Received echoed Data message: {:?}", echoed_data);
 
                 Ok(())
             }

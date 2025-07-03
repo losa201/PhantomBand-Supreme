@@ -6,3 +6,4 @@ pub mod doh;
 pub mod websocket;
 pub mod obfs4;
 pub mod traffic_shaping;
+pub mod tcp;
